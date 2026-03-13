@@ -15,7 +15,7 @@
 set -euo pipefail
 
 SWARM_SESSION="swarm"
-DASHBOARD_PY="$HOME/.micolash/lieutenant/dashboard.py"
+DASHBOARD_PY="$HOME/.lieutenant/dashboard.py"
 SWARM_BASE="$HOME/.micolash/swarm"
 
 # ─── Helpers ────────────────────────────────────────────────────────────────
@@ -43,7 +43,7 @@ cmd_dashboard() {
   # Launch dashboard in background
   python3 "$DASHBOARD_PY" &
   DASH_PID=$!
-  echo "$DASH_PID" > "$HOME/.micolash/lieutenant/dashboard.pid"
+  echo "$DASH_PID" > "$HOME/.lieutenant/dashboard.pid"
   echo "Dashboard started (PID $DASH_PID)"
 
   # Open in browser on macOS
