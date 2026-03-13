@@ -30,18 +30,49 @@ ensure_tmux_session() {
 # ─── Commands ───────────────────────────────────────────────────────────────
 
 cmd_init() {
+  local plan=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --plan) plan="$2"; shift 2;;
+      *) shift;;
+    esac
+  done
+
   ensure_tmux_session
   echo "Swarm session ready: $SWARM_SESSION"
   echo "  tmux attach -t $SWARM_SESSION"
+
+  if [[ -n "$plan" ]]; then
+    echo "Plan: $plan"
+    # Store plan path for the dashboard
+    echo "$plan" > "$HOME/.lieutenant/.plan_path"
+  fi
 }
 
 cmd_dashboard() {
+  local plan=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --plan) plan="$2"; shift 2;;
+      *) shift;;
+    esac
+  done
+
   # Kill existing dashboard if running
   pkill -f "python3.*dashboard.py" 2>/dev/null || true
   sleep 0.5
 
+  # Resolve plan path: explicit arg > stored path > default
+  if [[ -z "$plan" && -f "$HOME/.lieutenant/.plan_path" ]]; then
+    plan="$(cat "$HOME/.lieutenant/.plan_path")"
+  fi
+
   # Launch dashboard in background
-  python3 "$DASHBOARD_PY" &
+  local plan_arg=""
+  if [[ -n "$plan" ]]; then
+    plan_arg="--plan $plan"
+  fi
+  python3 "$DASHBOARD_PY" $plan_arg &
   DASH_PID=$!
   echo "$DASH_PID" > "$HOME/.lieutenant/dashboard.pid"
   echo "Dashboard started (PID $DASH_PID)"
@@ -60,6 +91,8 @@ cmd_spawn() {
   local permission_mode="default"
   local system_prompt=""
 
+  local plan=""
+
   # Parse args
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -67,11 +100,18 @@ cmd_spawn() {
       --base) base="$2"; shift 2;;
       --summary) summary="$2"; shift 2;;
       --criteria) criteria="$2"; shift 2;;
+      --plan) plan="$2"; shift 2;;
       --permission-mode) permission_mode="$2"; shift 2;;
       --system-prompt) system_prompt="$2"; shift 2;;
       *) echo "Unknown arg: $1"; exit 1;;
     esac
   done
+
+  # If plan provided but no summary/criteria, extract from plan file
+  if [[ -n "$plan" && -f "$plan" && -z "$summary" ]]; then
+    summary="See plan file for full context"
+    criteria="$(cat "$plan")"
+  fi
 
   if [[ -z "$ticket" ]]; then
     echo "Usage: se-agent spawn FLOW-123 --repo <path> [--summary ...] [--criteria ...]"
@@ -302,8 +342,8 @@ cmd_kill_all() {
 # ─── Main ───────────────────────────────────────────────────────────────────
 
 case "${1:-help}" in
-  init)      cmd_init ;;
-  dashboard) cmd_dashboard ;;
+  init)      shift; cmd_init "$@" ;;
+  dashboard) shift; cmd_dashboard "$@" ;;
   spawn)     shift; cmd_spawn "$@" ;;
   validate)  shift; cmd_validate "$@" ;;
   status)    cmd_status ;;
@@ -314,8 +354,8 @@ case "${1:-help}" in
     echo "se-agent — Lieutenant Agent Manager"
     echo ""
     echo "Commands:"
-    echo "  init                    Create tmux swarm session"
-    echo "  dashboard               Launch web dashboard"
+    echo "  init [--plan FILE]      Create tmux swarm session"
+    echo "  dashboard [--plan FILE] Launch web dashboard"
     echo "  spawn TICKET [opts]     Spawn an SE agent for a sub-task"
     echo "  validate TICKET [opts]  Spawn a validator to attack a ticket's changes"
     echo "  status                  Quick status of all windows"

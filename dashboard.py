@@ -15,10 +15,65 @@ SWARM_BASE = Path.home() / ".micolash" / "swarm"
 CLAUDE_PROJECTS = Path.home() / ".claude" / "projects"
 CLAUDE_SESSIONS = Path.home() / ".claude" / "sessions"
 CAGES_DIR = Path.home() / ".micolash" / "cages"
+LIEUTENANT_DIR = Path.home() / ".lieutenant"
 PORT = 7777
 
 # In-memory history of agents we've seen, so completed ones persist after tmux window closes
 _agent_history = {}  # id -> {name, phase, last_line, session_id, window, finished_at}
+
+# Path to the active plan file — set via --plan flag or /api/plan POST
+_plan_path = None
+
+
+# ─── Plan helpers ──────────────────────────────────────────────────────────
+
+def _resolve_plan_path():
+    """Find the active plan file. Priority: explicit _plan_path > today's run dir > default."""
+    global _plan_path
+    if _plan_path and Path(_plan_path).exists():
+        return Path(_plan_path)
+    # Check today's swarm run dir
+    today = SWARM_BASE / time.strftime("%Y%m%d") / "plan.md"
+    if today.exists():
+        _plan_path = str(today)
+        return today
+    # Check lieutenant dir
+    default = LIEUTENANT_DIR / "plan.md"
+    if default.exists():
+        _plan_path = str(default)
+        return default
+    return None
+
+
+def read_plan():
+    """Read the plan.md file and return its content."""
+    p = _resolve_plan_path()
+    if not p:
+        return None
+    try:
+        return p.read_text()
+    except OSError:
+        return None
+
+
+def update_plan_checkbox(line_num, checked):
+    """Toggle a checkbox on a specific line of the plan."""
+    p = _resolve_plan_path()
+    if not p:
+        return False
+    try:
+        lines = p.read_text().splitlines()
+        if 0 <= line_num < len(lines):
+            line = lines[line_num]
+            if checked:
+                lines[line_num] = line.replace("- [ ]", "- [x]", 1)
+            else:
+                lines[line_num] = line.replace("- [x]", "- [ ]", 1)
+            p.write_text("\n".join(lines) + "\n")
+            return True
+    except OSError:
+        pass
+    return False
 
 
 # ─── tmux helpers ───────────────────────────────────────────────────────────
@@ -347,6 +402,18 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
   .c-purple { color: var(--purple); }
   .c-dim { color: var(--text-dim); }
 
+  /* Plan rendering */
+  .plan-content { font-size: 11px; line-height: 1.7; }
+  .plan-content h1 { font-size: 14px; color: var(--accent); margin: 12px 0 6px; border-bottom: 1px solid var(--border); padding-bottom: 4px; }
+  .plan-content h2 { font-size: 12px; color: var(--cyan); margin: 10px 0 4px; }
+  .plan-content h3 { font-size: 11px; color: var(--yellow); margin: 8px 0 3px; }
+  .plan-content .cb-line { display: flex; align-items: flex-start; gap: 6px; padding: 2px 0; }
+  .plan-content .cb-line input[type=checkbox] { margin-top: 3px; cursor: pointer; accent-color: var(--green); }
+  .plan-content .cb-line.checked { color: var(--text-dim); text-decoration: line-through; }
+  .plan-content code { background: var(--surface2); padding: 1px 4px; border-radius: 3px; font-size: 10px; }
+  .plan-content ul { padding-left: 16px; }
+  .plan-content li { margin: 2px 0; }
+
   ::-webkit-scrollbar { width: 4px; }
   ::-webkit-scrollbar-track { background: transparent; }
   ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
@@ -376,6 +443,23 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
   </div>
 
   <div class="panels" id="panels">
+    <!-- Plan Panel (Orchestrator home) -->
+    <div class="panel" id="planPanel">
+      <div class="panel-header">
+        <div style="display:flex;align-items:center;gap:8px">
+          <span class="tag" style="background:rgba(57,210,192,0.15);color:var(--cyan)">PLAN</span>
+          <h2 id="planTitle">Mission</h2>
+        </div>
+        <div class="btns">
+          <button class="active" onclick="setPlanView('plan')">Plan</button>
+          <button onclick="setPlanView('transcript')">Orchestrator</button>
+        </div>
+      </div>
+      <div class="panel-body" id="planBody">
+        <div class="empty">No plan loaded.<br><br>Start with: <code>se-agent init --plan path/to/plan.md</code><br>or create <code>~/.lieutenant/plan.md</code></div>
+      </div>
+    </div>
+
     <!-- SE Panel -->
     <div class="panel" id="sePanel">
       <div class="panel-header" id="seHeader" style="display:none">
@@ -430,12 +514,84 @@ let agents = {};          // se agents
 let validators = {};      // val agents
 let seView = 'transcript';
 let valView = 'transcript';
+let planView = 'plan';    // 'plan' or 'transcript' (orchestrator)
 let autoScrollSe = true, autoScrollVal = true;
 
 const $ = s => document.querySelector(s);
 const api = async p => (await fetch('/api'+p)).json();
 const apiPost = async (p,b) => (await fetch('/api'+p,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)})).json();
 function esc(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+function renderPlanMarkdown(text) {
+  if (!text) return '<div class="empty">No plan loaded.</div>';
+  let html = '<div class="plan-content">';
+  const lines = text.split('\n');
+  let inList = false;
+  lines.forEach((line, idx) => {
+    const trimmed = line.trim();
+    // Headers
+    if (trimmed.startsWith('### ')) { if(inList){html+='</ul>';inList=false;} html += `<h3>${esc(trimmed.slice(4))}</h3>`; return; }
+    if (trimmed.startsWith('## ')) { if(inList){html+='</ul>';inList=false;} html += `<h2>${esc(trimmed.slice(3))}</h2>`; return; }
+    if (trimmed.startsWith('# ')) { if(inList){html+='</ul>';inList=false;} html += `<h1>${esc(trimmed.slice(2))}</h1>`; return; }
+    // Checkboxes
+    if (trimmed.startsWith('- [x] ') || trimmed.startsWith('- [ ] ')) {
+      const checked = trimmed.startsWith('- [x]');
+      const label = trimmed.slice(6);
+      const cls = checked ? ' checked' : '';
+      html += `<div class="cb-line${cls}"><input type="checkbox" data-line="${idx}" ${checked?'checked':''} onchange="toggleCheck(${idx},this.checked)">${esc(label)}</div>`;
+      return;
+    }
+    // Regular list items
+    if (trimmed.startsWith('- ')) {
+      if(!inList){html+='<ul>';inList=true;}
+      html += `<li>${esc(trimmed.slice(2))}</li>`;
+      return;
+    }
+    if (inList && !trimmed) { html+='</ul>'; inList=false; return; }
+    // Inline code
+    let escaped = esc(trimmed);
+    escaped = escaped.replace(/`([^`]+)`/g, '<code>$1</code>');
+    if (trimmed) html += `<div>${escaped}</div>`;
+    else html += '<br>';
+  });
+  if (inList) html += '</ul>';
+  html += '</div>';
+  return html;
+}
+
+async function toggleCheck(lineNum, checked) {
+  await apiPost('/plan/check', {line: lineNum, checked: checked});
+  refreshPlanPanel();
+}
+
+function setPlanView(v) {
+  planView = v;
+  document.querySelectorAll('#planPanel .btns button').forEach(b =>
+    b.classList.toggle('active', b.textContent.toLowerCase() === (v === 'plan' ? 'plan' : 'orchestrator')));
+  refreshPlanPanel();
+}
+
+async function refreshPlanPanel() {
+  const el = $('#planBody');
+  if (planView === 'plan') {
+    const data = await api('/plan');
+    if (data.content) {
+      el.innerHTML = renderPlanMarkdown(data.content);
+      $('#planTitle').textContent = data.title || 'Mission';
+    } else {
+      el.innerHTML = '<div class="empty">No plan loaded.<br><br>Start with: <code>se-agent init --plan path/to/plan.md</code><br>or create <code>~/.lieutenant/plan.md</code></div>';
+    }
+  } else {
+    // Show orchestrator transcript/terminal
+    const orch = agents['orch:orchestrator'];
+    if (orch && orch.session_id) {
+      const data = await api(`/transcript/${orch.session_id}?last=60`);
+      el.innerHTML = data.formatted || '<span class="c-dim">(orchestrator not active)</span>';
+    } else {
+      el.innerHTML = '<span class="c-dim">(no orchestrator session)</span>';
+    }
+  }
+}
 
 function card(id, name, phase, detail, sel, alive) {
   const s = sel === id ? 'selected' : '';
@@ -505,6 +661,7 @@ async function refresh() {
     (valCount ? ` &mdash; ${valCount} validators${vStr?' ('+vStr+')':''}` : '');
 
   // Refresh panels
+  await refreshPlanPanel();
   if (selectedSe) await refreshSePanel();
   if (selectedVal) await refreshValPanel();
 }
@@ -866,6 +1023,18 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
             self._html(DASHBOARD_HTML)
             return
 
+        if path == "/api/plan":
+            content = read_plan()
+            title = ""
+            if content:
+                # Extract title from first H1
+                for line in content.splitlines():
+                    if line.strip().startswith("# "):
+                        title = line.strip()[2:]
+                        break
+            self._json({"content": content, "title": title, "path": str(_plan_path or "")})
+            return
+
         if path == "/api/agents":
             windows = tmux_windows()
             live_ids = set()
@@ -984,6 +1153,21 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
         path = parsed.path
         cl = int(self.headers.get("Content-Length", 0))
         body = json.loads(self.rfile.read(cl)) if cl else {}
+
+        if path == "/api/plan/check":
+            ok = update_plan_checkbox(body.get("line", -1), body.get("checked", False))
+            self._json({"ok": ok})
+            return
+
+        if path == "/api/plan/set":
+            global _plan_path
+            p = body.get("path", "")
+            if p and Path(p).exists():
+                _plan_path = p
+                self._json({"ok": True, "path": p})
+            else:
+                self._json({"ok": False, "error": "file not found"})
+            return
 
         m = re.match(r"/api/send/(.+)", path)
         if m:
@@ -1145,11 +1329,27 @@ def colorize_validator_text(text):
 
 
 def main():
+    import sys
     import socketserver
+
+    global _plan_path
+
+    # Parse --plan argument
+    args = sys.argv[1:]
+    i = 0
+    while i < len(args):
+        if args[i] == "--plan" and i + 1 < len(args):
+            _plan_path = os.path.abspath(args[i + 1])
+            i += 2
+        else:
+            i += 1
+
     socketserver.TCPServer.allow_reuse_address = True
     server = http.server.HTTPServer(("127.0.0.1", PORT), DashboardHandler)
     server.allow_reuse_address = True
     print(f"Lieutenant → http://localhost:{PORT}")
+    if _plan_path:
+        print(f"Plan: {_plan_path}")
     print(f"Watching tmux session: swarm")
     try:
         server.serve_forever()
