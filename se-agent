@@ -1,0 +1,333 @@
+#!/bin/bash
+# se-agent — Spawn SE agents and validators in tmux windows with claude sessions
+#
+# Usage:
+#   se-agent spawn FLOW-123 --repo ~/workspace/src/flow --base development \
+#     --summary "Add payment retry logic" --criteria "- Retry on 5xx\n- Max 3 attempts"
+#
+#   se-agent validate FLOW-123 --repo ~/workspace/src/flow
+#
+#   se-agent dashboard          # Launch the dashboard
+#   se-agent init               # Create tmux swarm session
+#   se-agent status             # Quick status of all agents
+#   se-agent list               # List active agent windows
+
+set -euo pipefail
+
+SWARM_SESSION="swarm"
+DASHBOARD_PY="$HOME/.micolash/se-dashboard/dashboard.py"
+SWARM_BASE="$HOME/.micolash/swarm"
+
+# ─── Helpers ────────────────────────────────────────────────────────────────
+
+ensure_tmux_session() {
+  if ! tmux has-session -t "$SWARM_SESSION" 2>/dev/null; then
+    tmux new-session -d -s "$SWARM_SESSION" -n orchestrator
+    echo "Created tmux session: $SWARM_SESSION"
+  fi
+}
+
+# ─── Commands ───────────────────────────────────────────────────────────────
+
+cmd_init() {
+  ensure_tmux_session
+  echo "Swarm session ready: $SWARM_SESSION"
+  echo "  tmux attach -t $SWARM_SESSION"
+}
+
+cmd_dashboard() {
+  # Kill existing dashboard if running
+  pkill -f "python3.*dashboard.py" 2>/dev/null || true
+  sleep 0.5
+
+  # Launch dashboard in background
+  python3 "$DASHBOARD_PY" &
+  DASH_PID=$!
+  echo "$DASH_PID" > "$HOME/.micolash/se-dashboard/dashboard.pid"
+  echo "Dashboard started (PID $DASH_PID)"
+
+  # Open in browser on macOS
+  sleep 0.5
+  open "http://localhost:7777" 2>/dev/null || echo "Open http://localhost:7777"
+}
+
+cmd_spawn() {
+  local ticket="$1"; shift
+  local repo=""
+  local base="development"
+  local summary=""
+  local criteria=""
+  local permission_mode="default"
+  local system_prompt=""
+
+  # Parse args
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --repo) repo="$2"; shift 2;;
+      --base) base="$2"; shift 2;;
+      --summary) summary="$2"; shift 2;;
+      --criteria) criteria="$2"; shift 2;;
+      --permission-mode) permission_mode="$2"; shift 2;;
+      --system-prompt) system_prompt="$2"; shift 2;;
+      *) echo "Unknown arg: $1"; exit 1;;
+    esac
+  done
+
+  if [[ -z "$ticket" ]]; then
+    echo "Usage: se-agent spawn FLOW-123 --repo <path> [--summary ...] [--criteria ...]"
+    exit 1
+  fi
+
+  ensure_tmux_session
+
+  local window_name="se/$ticket"
+
+  # Check if window already exists
+  if tmux list-windows -t "$SWARM_SESSION" -F '#{window_name}' 2>/dev/null | grep -q "^${window_name}$"; then
+    echo "Agent window $window_name already exists"
+    exit 1
+  fi
+
+  # Create cage if repo is specified and cage doesn't exist
+  if [[ -n "$repo" ]]; then
+    if ! cage list 2>/dev/null | grep -q "$ticket"; then
+      echo "Creating cage: $ticket"
+      cage create "$ticket" --repo "$repo" --branch "$base"
+    fi
+  fi
+
+  # Determine working directory
+  local workdir="$HOME/.micolash/cages/$ticket/workspace"
+  if [[ ! -d "$workdir" ]]; then
+    workdir="${repo:-$HOME}"
+  fi
+
+  # Build system prompt if not provided
+  if [[ -z "$system_prompt" ]]; then
+    system_prompt="You are SE Agent '$ticket'. Your mission is to implement this Jira ticket autonomously.
+
+Ticket: $ticket
+Summary: ${summary:-No summary provided — fetch from Jira}
+
+Acceptance Criteria:
+${criteria:-Fetch from Jira ticket $ticket}
+
+Working Directory: $workdir
+
+Instructions:
+1. If acceptance criteria are missing above, fetch them from Jira first
+2. Read the relevant code in your workspace
+3. Implement the changes described in the acceptance criteria
+4. Write or update tests
+5. Commit with message format: $ticket: <what and why>
+6. When done, report what you changed and confirm all criteria are met
+7. Wait for the orchestrator to approve before pushing or creating a PR
+
+Constraints:
+- Only modify files in your workspace
+- Keep changes minimal and focused
+- If stuck after 2 attempts, describe the blocker and wait for guidance
+- Do not push or create PRs unless told to"
+  fi
+
+  # Create tmux window
+  tmux new-window -t "$SWARM_SESSION" -n "$window_name"
+
+  # Enable pane logging for the watcher
+  local run_dir="$SWARM_BASE/$(date +%Y%m%d)"
+  mkdir -p "$run_dir/agents/$ticket"
+  tmux pipe-pane -t "$SWARM_SESSION:$window_name" -o \
+    "cat >> $run_dir/agents/$ticket/transcript.log"
+
+  # Write system prompt to file (avoids shell quoting issues with tmux send-keys)
+  local prompt_file="$run_dir/agents/$ticket/system-prompt.txt"
+  echo "$system_prompt" > "$prompt_file"
+
+  # Launch claude in the window
+  tmux send-keys -t "$SWARM_SESSION:$window_name" \
+    "cd '$workdir' && claude --permission-mode $permission_mode --system-prompt \"\$(cat '$prompt_file')\"" Enter
+
+  echo "Spawned $window_name in tmux session $SWARM_SESSION"
+  echo "  Working dir: $workdir"
+  echo "  Permission mode: $permission_mode"
+}
+
+cmd_validate() {
+  local ticket="$1"; shift
+  local repo=""
+  local permission_mode="default"
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --repo) repo="$2"; shift 2;;
+      --permission-mode) permission_mode="$2"; shift 2;;
+      *) echo "Unknown arg: $1"; exit 1;;
+    esac
+  done
+
+  if [[ -z "$ticket" ]]; then
+    echo "Usage: se-agent validate FLOW-123 [--repo <path>]"
+    exit 1
+  fi
+
+  ensure_tmux_session
+
+  local window_name="val/$ticket"
+
+  if tmux list-windows -t "$SWARM_SESSION" -F '#{window_name}' 2>/dev/null | grep -q "^${window_name}$"; then
+    echo "Validator window $window_name already exists"
+    exit 1
+  fi
+
+  # Determine working directory — prefer cage workspace, fall back to repo
+  local workdir="$HOME/.micolash/cages/$ticket/workspace"
+  if [[ ! -d "$workdir" ]]; then
+    workdir="${repo:-$HOME}"
+  fi
+
+  local system_prompt="You are an ADVERSARIAL VALIDATOR for ticket '$ticket'.
+
+Your job is to ATTACK the code changes in this workspace. You are hostile — assume everything is wrong until proven right with quantitative evidence.
+
+Working Directory: $workdir
+
+## Attack Protocol
+
+1. Run 'git diff --stat' and 'git diff' to see what changed
+2. Run 'git log --oneline -10' to see commit messages / stated outcomes
+3. For EACH changed file:
+   a. Classify risk: TIER 1 (trivial), TIER 2 (prove it), TIER 3 (guilty until innocent)
+   b. Grep for callers of changed functions — count them
+   c. Check if tests exist — run them, report pass/fail counts
+   d. Look for hallucinated imports, non-existent APIs, wrong method signatures
+   e. Check error handling, null cases, concurrent access
+
+4. Issue challenges in this format:
+   [TIER X] CHALLENGE: <description>
+   FILE: <path>:<line>
+   CLAIM: <what the code implies>
+   QUANTITATIVE EVIDENCE: <command output, counts, test results>
+   VERDICT: WRONG | UNVERIFIED | SUSPICIOUS | CONFIRMED
+   ACTION: <what must be done>
+
+5. End with a summary:
+   Total challenges: N
+     WRONG: n
+     UNVERIFIED: n
+     SUSPICIOUS: n
+     CONFIRMED: n
+   Risk assessment: BLOCK | REVIEW | PASS
+
+## Rules
+- CONFIRMED requires a test passing or a grep count proving the claim
+- 'Looks correct' is NOT evidence — run a command, get a number
+- For TIER 3 files (auth, payments, infra, migrations): guilty until proven innocent
+- You are scoped to THIS diff only — don't go on tangents"
+
+  # Create tmux window
+  tmux new-window -t "$SWARM_SESSION" -n "$window_name"
+
+  # Enable pane logging
+  local run_dir="$SWARM_BASE/$(date +%Y%m%d)"
+  mkdir -p "$run_dir/validators/$ticket"
+  tmux pipe-pane -t "$SWARM_SESSION:$window_name" -o \
+    "cat >> $run_dir/validators/$ticket/transcript.log"
+
+  # Write system prompt to file (avoids shell quoting issues with tmux send-keys)
+  local prompt_file="$run_dir/validators/$ticket/system-prompt.txt"
+  echo "$system_prompt" > "$prompt_file"
+
+  # Launch claude
+  tmux send-keys -t "$SWARM_SESSION:$window_name" \
+    "cd '$workdir' && claude --permission-mode $permission_mode --system-prompt \"\$(cat '$prompt_file')\"" Enter
+
+  echo "Spawned validator $window_name"
+  echo "  Working dir: $workdir"
+  echo "  Attacking: $ticket"
+}
+
+cmd_status() {
+  if ! tmux has-session -t "$SWARM_SESSION" 2>/dev/null; then
+    echo "No swarm session running"
+    exit 0
+  fi
+
+  echo "Swarm windows:"
+  tmux list-windows -t "$SWARM_SESSION" -F '  #{window_name}  #{window_activity_string}' 2>/dev/null
+}
+
+cmd_list() {
+  if ! tmux has-session -t "$SWARM_SESSION" 2>/dev/null; then
+    echo "No swarm session"
+    exit 0
+  fi
+  tmux list-windows -t "$SWARM_SESSION" -F '#{window_index}: #{window_name}' 2>/dev/null | grep -E "^[0-9]+: (se|val)/"
+}
+
+cmd_kill() {
+  local ticket="$1"
+  # Try se/ first, then val/
+  local window_name=""
+  for prefix in se val; do
+    if tmux list-windows -t "$SWARM_SESSION" -F '#{window_name}' 2>/dev/null | grep -q "^${prefix}/${ticket}$"; then
+      window_name="${prefix}/${ticket}"
+      break
+    fi
+  done
+  if [[ -z "$window_name" ]]; then
+    echo "No window found for $ticket"
+    exit 1
+  fi
+  tmux send-keys -t "$SWARM_SESSION:$window_name" C-c "" 2>/dev/null
+  sleep 0.5
+  tmux send-keys -t "$SWARM_SESSION:$window_name" "/exit" Enter 2>/dev/null
+  sleep 1
+  tmux kill-window -t "$SWARM_SESSION:$window_name" 2>/dev/null
+  echo "Killed $window_name"
+}
+
+cmd_kill_all() {
+  for win in $(tmux list-windows -t "$SWARM_SESSION" -F '#{window_name}' 2>/dev/null | grep -E "^(se|val)/"); do
+    tmux send-keys -t "$SWARM_SESSION:$win" C-c "" 2>/dev/null
+    sleep 0.3
+    tmux send-keys -t "$SWARM_SESSION:$win" "/exit" Enter 2>/dev/null
+  done
+  sleep 1
+  for win in $(tmux list-windows -t "$SWARM_SESSION" -F '#{window_name}' 2>/dev/null | grep -E "^(se|val)/"); do
+    tmux kill-window -t "$SWARM_SESSION:$win" 2>/dev/null
+  done
+  echo "All agents and validators killed"
+}
+
+# ─── Main ───────────────────────────────────────────────────────────────────
+
+case "${1:-help}" in
+  init)      cmd_init ;;
+  dashboard) cmd_dashboard ;;
+  spawn)     shift; cmd_spawn "$@" ;;
+  validate)  shift; cmd_validate "$@" ;;
+  status)    cmd_status ;;
+  list)      cmd_list ;;
+  kill)      shift; cmd_kill "$@" ;;
+  kill-all)  cmd_kill_all ;;
+  help|*)
+    echo "se-agent — SE Agent Swarm Manager"
+    echo ""
+    echo "Commands:"
+    echo "  init                    Create tmux swarm session"
+    echo "  dashboard               Launch web dashboard"
+    echo "  spawn TICKET [opts]     Spawn an SE agent for a sub-task"
+    echo "  validate TICKET [opts]  Spawn a validator to attack a ticket's changes"
+    echo "  status                  Quick status of all windows"
+    echo "  list                    List active agent/validator windows"
+    echo "  kill TICKET             Kill an agent or validator"
+    echo "  kill-all                Kill all agents and validators"
+    echo ""
+    echo "Spawn options:"
+    echo "  --repo PATH             Repository path"
+    echo "  --base BRANCH           Base branch (default: development)"
+    echo "  --summary TEXT           Ticket summary"
+    echo "  --criteria TEXT          Acceptance criteria"
+    echo "  --permission-mode MODE  Claude permission mode (default: default)"
+    ;;
+esac
