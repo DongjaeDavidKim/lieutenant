@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""SE Agent Swarm Dashboard — local web UI for monitoring tmux-based Claude agents."""
+"""Lieutenant — local web UI for monitoring tmux-based Claude agents."""
 
 import http.server
 import json
@@ -206,7 +206,7 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>SE Swarm Dashboard</title>
+<title>Lieutenant</title>
 <style>
   :root {
     --bg: #0d1117; --surface: #161b22; --surface2: #21262d;
@@ -355,7 +355,7 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
 <body>
 
 <div class="topbar">
-  <h1>SE SWARM</h1>
+  <h1>LIEUTENANT</h1>
   <div class="meta" id="topMeta"></div>
 </div>
 
@@ -1101,7 +1101,7 @@ def main():
     socketserver.TCPServer.allow_reuse_address = True
     server = http.server.HTTPServer(("127.0.0.1", PORT), DashboardHandler)
     server.allow_reuse_address = True
-    print(f"SE Swarm Dashboard → http://localhost:{PORT}")
+    print(f"Lieutenant → http://localhost:{PORT}")
     print(f"Watching tmux session: swarm")
     try:
         server.serve_forever()

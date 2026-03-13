@@ -1,5 +1,5 @@
 #!/bin/bash
-# se-agent — Spawn SE agents and validators in tmux windows with claude sessions
+# se-agent — Lieutenant: spawn SE agents and validators in tmux windows with claude sessions
 #
 # Usage:
 #   se-agent spawn FLOW-123 --repo ~/workspace/src/flow --base development \
@@ -15,7 +15,7 @@
 set -euo pipefail
 
 SWARM_SESSION="swarm"
-DASHBOARD_PY="$HOME/.micolash/se-dashboard/dashboard.py"
+DASHBOARD_PY="$HOME/.micolash/lieutenant/dashboard.py"
 SWARM_BASE="$HOME/.micolash/swarm"
 
 # ─── Helpers ────────────────────────────────────────────────────────────────
@@ -43,7 +43,7 @@ cmd_dashboard() {
   # Launch dashboard in background
   python3 "$DASHBOARD_PY" &
   DASH_PID=$!
-  echo "$DASH_PID" > "$HOME/.micolash/se-dashboard/dashboard.pid"
+  echo "$DASH_PID" > "$HOME/.micolash/lieutenant/dashboard.pid"
   echo "Dashboard started (PID $DASH_PID)"
 
   # Open in browser on macOS
@@ -311,7 +311,7 @@ case "${1:-help}" in
   kill)      shift; cmd_kill "$@" ;;
   kill-all)  cmd_kill_all ;;
   help|*)
-    echo "se-agent — SE Agent Swarm Manager"
+    echo "se-agent — Lieutenant Agent Manager"
     echo ""
     echo "Commands:"
     echo "  init                    Create tmux swarm session"
