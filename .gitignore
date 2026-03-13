@@ -7,6 +7,13 @@ state.md
 # OS
 .DS_Store
 
-# Python
+# Python (legacy)
 __pycache__/
 *.pyc
+
+# Phoenix / Elixir
+lieutenant_phoenix/_build/
+lieutenant_phoenix/deps/
+lieutenant_phoenix/.elixir_ls/
+lieutenant_phoenix/erl_crash.dump
+*.beam

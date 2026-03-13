@@ -16,6 +16,7 @@ set -euo pipefail
 
 SWARM_SESSION="swarm"
 DASHBOARD_PY="$HOME/.lieutenant/dashboard.py"
+PHOENIX_DIR="$HOME/.lieutenant/lieutenant_phoenix"
 SWARM_BASE="$HOME/.micolash/swarm"
 STATE_FILE="$HOME/.lieutenant/state.md"
 PORT_FILE="$HOME/.lieutenant/.port"
@@ -196,35 +197,63 @@ ${plan_content:-No plan loaded. Ask the user what to work on.}
 
 cmd_dashboard() {
   local plan=""
+  local legacy=false
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --plan) plan="$2"; shift 2;;
+      --legacy) legacy=true; shift;;
       *) shift;;
     esac
   done
 
-  # Kill existing dashboard if running
+  # Kill existing dashboard (Phoenix or Python)
+  pkill -f "beam.smp.*lieutenant" 2>/dev/null || true
   pkill -f "python3.*dashboard.py" 2>/dev/null || true
   sleep 0.5
+  rm -f "$PORT_FILE"
 
   # Resolve plan path: explicit arg > stored path > default
   if [[ -z "$plan" && -f "$HOME/.lieutenant/.plan_path" ]]; then
     plan="$(cat "$HOME/.lieutenant/.plan_path")"
   fi
-
-  # Launch dashboard in background (random port unless --port specified)
-  local plan_arg=""
   if [[ -n "$plan" ]]; then
-    plan_arg="--plan $plan"
+    echo "$plan" > "$HOME/.lieutenant/.plan_path"
   fi
-  python3 "$DASHBOARD_PY" $plan_arg &
-  DASH_PID=$!
-  echo "$DASH_PID" > "$HOME/.lieutenant/dashboard.pid"
-  echo "Dashboard started (PID $DASH_PID)"
 
-  # Wait for the port file to appear (dashboard writes it on startup)
+  if [[ "$legacy" == true ]]; then
+    # Legacy Python dashboard
+    local plan_arg=""
+    if [[ -n "$plan" ]]; then
+      plan_arg="--plan $plan"
+    fi
+    python3 "$DASHBOARD_PY" $plan_arg &
+    DASH_PID=$!
+    echo "$DASH_PID" > "$HOME/.lieutenant/dashboard.pid"
+    echo "Dashboard started (Python, PID $DASH_PID)"
+  else
+    # Phoenix LiveView dashboard
+    if [[ ! -d "$PHOENIX_DIR" ]]; then
+      echo "Error: Phoenix project not found at $PHOENIX_DIR"
+      echo "Falling back to Python dashboard..."
+      cmd_dashboard --legacy ${plan:+--plan "$plan"}
+      return
+    fi
+
+    local plan_env=""
+    if [[ -n "$plan" ]]; then
+      plan_env="LIEUTENANT_PLAN_PATH=$plan"
+    fi
+
+    cd "$PHOENIX_DIR"
+    env $plan_env MIX_ENV=dev mix phx.server &
+    DASH_PID=$!
+    echo "$DASH_PID" > "$HOME/.lieutenant/dashboard.pid"
+    echo "Dashboard started (Phoenix LiveView, PID $DASH_PID)"
+  fi
+
+  # Wait for the port file to appear
   local tries=0
-  while [[ ! -f "$PORT_FILE" ]] && (( tries < 10 )); do
+  while [[ ! -f "$PORT_FILE" ]] && (( tries < 20 )); do
     sleep 0.3
     tries=$((tries + 1))
   done
@@ -575,18 +604,25 @@ cmd_recover() {
   echo ""
   echo "Recovery summary: $recovered alive, $missing missing"
 
-  # Check dashboard
+  # Check dashboard (Phoenix or Python)
   if [[ -f "$PORT_FILE" ]]; then
     local port
     port="$(cat "$PORT_FILE")"
     if curl -s "http://localhost:$port/api/agents" >/dev/null 2>&1; then
       echo "Dashboard is running at http://localhost:$port"
+    elif curl -s "http://localhost:4000/api/agents" >/dev/null 2>&1; then
+      echo "Dashboard is running at http://localhost:4000 (Phoenix dev default)"
     else
       echo "Dashboard port file exists ($port) but not responding — restart with: se-agent dashboard"
       rm -f "$PORT_FILE"
     fi
   else
-    echo "Dashboard not running — start with: se-agent dashboard"
+    # Check Phoenix default port
+    if curl -s "http://localhost:4000/api/agents" >/dev/null 2>&1; then
+      echo "Dashboard is running at http://localhost:4000 (Phoenix)"
+    else
+      echo "Dashboard not running — start with: se-agent dashboard"
+    fi
   fi
 
   # Refresh state

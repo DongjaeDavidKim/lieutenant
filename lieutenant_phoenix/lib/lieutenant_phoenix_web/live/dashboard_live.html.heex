@@ -1,0 +1,263 @@
+<div class="topbar">
+  <h1>LIEUTENANT</h1>
+  <div class="meta"><%= @top_meta %></div>
+</div>
+
+<div class="main">
+  <div class="sidebar">
+    <!-- Orchestrator -->
+    <div class="sb-section">
+      <div class="sb-header">Orchestrator</div>
+      <%= if orch = @agents["orch:orchestrator"] do %>
+        <div
+          class={"card #{if @selected_se && @selected_se.id == "orch:orchestrator", do: "selected", else: ""}"}
+          phx-click="select_agent"
+          phx-value-id="orch:orchestrator"
+        >
+          <div class="name">
+            <span class="dot orchestrator"></span>orchestrator<span style="margin-left:auto;font-size:8px;color:var(--text-dim);text-transform:uppercase">orchestrator</span>
+          </div>
+          <div class="detail"><%= if orch.session_id, do: "claude", else: "shell" %></div>
+        </div>
+      <% end %>
+    </div>
+
+    <!-- SE Agents -->
+    <div class="sb-section">
+      <div class="sb-header">SE Agents</div>
+      <% se_agents =
+        @agents
+        |> Map.values()
+        |> Enum.filter(&String.starts_with?(&1.id, "se:"))
+        |> Enum.sort_by(&{!&1.alive, &1.id}) %>
+      <%= if se_agents == [] do %>
+        <div style="padding:10px 12px;font-size:10px;color:var(--text-dim)">No agents</div>
+      <% else %>
+        <%= for agent <- se_agents do %>
+          <% ticket = agent.id |> String.split(":") |> List.last() %>
+          <% label =
+            if agent.alive == false,
+              do:
+                if(agent.phase == "done-pr",
+                  do: "done (PR)",
+                  else:
+                    if(agent.phase in ["done", "error"],
+                      do: agent.phase,
+                      else: "finished"
+                    )
+                ),
+              else: agent.phase %>
+          <div
+            class={"card #{if @selected_se && @selected_se.id == agent.id, do: "selected", else: ""}"}
+            style={if agent.alive == false, do: "opacity:0.5", else: ""}
+            phx-click="select_agent"
+            phx-value-id={agent.id}
+          >
+            <div class="name">
+              <span class={"dot #{agent.phase}"}></span><%= ticket %><span style={"margin-left:auto;font-size:8px;color:#{if agent.alive == false, do: "var(--green)", else: "var(--text-dim)"};text-transform:uppercase"}><%= label %></span>
+            </div>
+            <div class="detail"><%= agent.last_line %></div>
+          </div>
+        <% end %>
+      <% end %>
+    </div>
+
+    <!-- Validators -->
+    <div class="sb-section">
+      <div class="sb-header">Validators</div>
+      <% val_list =
+        @validators
+        |> Map.values()
+        |> Enum.sort_by(&{!&1.alive, &1.id}) %>
+      <%= if val_list == [] do %>
+        <div style="padding:10px 12px;font-size:10px;color:var(--text-dim)">No validators</div>
+      <% else %>
+        <%= for v <- val_list do %>
+          <% ticket = v.id |> String.split(":") |> List.last() %>
+          <div
+            class={"card #{if @selected_val && @selected_val.id == v.id, do: "selected", else: ""}"}
+            style={if v.alive == false, do: "opacity:0.5", else: ""}
+            phx-click="select_agent"
+            phx-value-id={v.id}
+          >
+            <div class="name">
+              <span class={"dot #{v.val_phase}"}></span><%= ticket %><span style="margin-left:auto;font-size:8px;color:var(--text-dim);text-transform:uppercase"><%= v.val_phase %></span>
+            </div>
+            <div class="detail"><%= v.last_line %></div>
+          </div>
+        <% end %>
+      <% end %>
+    </div>
+  </div>
+
+  <div class="panels">
+    <!-- Plan Panel -->
+    <div class="panel" id="planPanel">
+      <div class="panel-header">
+        <div style="display:flex;align-items:center;gap:8px">
+          <span class="tag" style="background:rgba(57,210,192,0.15);color:var(--cyan)">PLAN</span>
+          <h2><%= @plan_title %></h2>
+        </div>
+        <div class="btns">
+          <button
+            class={if @plan_view == "plan", do: "active", else: ""}
+            phx-click="set_plan_view"
+            phx-value-view="plan"
+          >
+            Plan
+          </button>
+          <button
+            class={if @plan_view == "transcript", do: "active", else: ""}
+            phx-click="set_plan_view"
+            phx-value-view="transcript"
+          >
+            Orchestrator
+          </button>
+        </div>
+      </div>
+      <div class="panel-body" id="planBody" phx-hook="AutoScroll">
+        <%= Phoenix.HTML.raw(@plan_html) %>
+      </div>
+    </div>
+
+    <!-- SE Panel -->
+    <div class="panel" id="sePanel">
+      <%= if @selected_se do %>
+        <% ticket = @selected_se.id |> String.split(":") |> List.last() %>
+        <div class="panel-header">
+          <div style="display:flex;align-items:center;gap:8px">
+            <span class="tag se">SE</span>
+            <h2>
+              <%= ticket %><%= if @selected_se.alive == false, do: " (finished)" %>
+            </h2>
+          </div>
+          <div class="btns">
+            <button
+              class={if @se_view == "transcript", do: "active", else: ""}
+              phx-click="set_se_view"
+              phx-value-view="transcript"
+            >
+              Transcript
+            </button>
+            <button
+              class={if @se_view == "tmux", do: "active", else: ""}
+              phx-click="set_se_view"
+              phx-value-view="tmux"
+            >
+              Terminal
+            </button>
+            <button
+              class={if @se_view == "diff", do: "active", else: ""}
+              phx-click="set_se_view"
+              phx-value-view="diff"
+            >
+              Diff
+            </button>
+            <button
+              class={if @se_view == "artifacts", do: "active", else: ""}
+              phx-click="set_se_view"
+              phx-value-view="artifacts"
+            >
+              Artifacts
+            </button>
+            <%= unless String.starts_with?(@selected_se.id, "orch:") do %>
+              <button
+                class="danger"
+                phx-click="kill_agent"
+                phx-value-id={@selected_se.id}
+                data-confirm={"Kill #{@selected_se.id}?"}
+              >
+                Kill
+              </button>
+            <% end %>
+          </div>
+        </div>
+        <div class="panel-body" id="seBody" phx-hook="AutoScroll" phx-update="replace">
+          <%= Phoenix.HTML.raw(@se_body) %>
+        </div>
+        <%= if @se_view == "transcript" and @selected_se.alive do %>
+          <div class="cmd-bar">
+            <form phx-submit="send_to_se" style="display:flex;gap:4px;flex:1">
+              <input
+                name="message"
+                placeholder="Send to SE agent..."
+                autocomplete="off"
+                style="flex:1;background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:5px 8px;border-radius:4px;font-family:inherit;font-size:11px;outline:none"
+              />
+              <button
+                type="submit"
+                style="background:var(--accent);color:var(--bg);border:none;padding:5px 10px;border-radius:4px;font-family:inherit;font-size:11px;font-weight:600;cursor:pointer"
+              >
+                Send
+              </button>
+            </form>
+          </div>
+        <% end %>
+        <%= if @se_view == "tmux" and @selected_se.alive do %>
+          <div class="cmd-bar">
+            <form phx-submit="send_to_term" style="display:flex;gap:4px;flex:1">
+              <input
+                name="command"
+                placeholder="Run command in cage terminal..."
+                autocomplete="off"
+                style="flex:1;background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:5px 8px;border-radius:4px;font-family:inherit;font-size:11px;outline:none"
+              />
+              <button
+                type="submit"
+                style="background:var(--accent);color:var(--bg);border:none;padding:5px 10px;border-radius:4px;font-family:inherit;font-size:11px;font-weight:600;cursor:pointer"
+              >
+                Run
+              </button>
+            </form>
+          </div>
+        <% end %>
+      <% else %>
+        <div class="panel-body">
+          <div class="empty">Select an agent to view its conversation</div>
+        </div>
+      <% end %>
+    </div>
+
+    <!-- Validator Panel -->
+    <%= if @validators != %{} do %>
+      <div class="panel" id="valPanel">
+        <%= if @selected_val do %>
+          <% val_ticket = @selected_val.id |> String.split(":") |> List.last() %>
+          <div class="panel-header">
+            <div style="display:flex;align-items:center;gap:8px">
+              <span class="tag val">VALIDATOR</span>
+              <h2><%= val_ticket %></h2>
+            </div>
+            <div class="btns">
+              <button
+                class={if @val_view == "transcript", do: "active", else: ""}
+                phx-click="set_val_view"
+                phx-value-view="transcript"
+              >
+                Challenges
+              </button>
+              <button
+                class={if @val_view == "tmux", do: "active", else: ""}
+                phx-click="set_val_view"
+                phx-value-view="tmux"
+              >
+                Terminal
+              </button>
+            </div>
+          </div>
+          <div class="panel-body" id="valBody" phx-hook="AutoScroll" phx-update="replace">
+            <%= Phoenix.HTML.raw(@val_body) %>
+          </div>
+        <% else %>
+          <div class="panel-body">
+            <div class="empty">
+              Validator appears when an SE agent's work is challenged.<br /><br />
+              The validator attacks claims, greps for evidence,<br />
+              and issues verdicts: CONFIRMED / WRONG / UNVERIFIED.
+            </div>
+          </div>
+        <% end %>
+      </div>
+    <% end %>
+  </div>
+</div>
