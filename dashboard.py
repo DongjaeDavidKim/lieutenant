@@ -334,8 +334,13 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
   .panel {
     flex: 1; display: flex; flex-direction: column; overflow: hidden;
     border-right: 1px solid var(--border);
+    min-width: 0;
   }
   .panel:last-child { border-right: none; }
+  #planPanel { flex: 0 0 45%; max-width: 45%; }
+  #sePanel { flex: 1; }
+  #valPanel { flex: 0 0 30%; max-width: 30%; }
+  #valPanel.hidden { display: none; }
   .panel-header {
     padding: 6px 12px; background: var(--surface); border-bottom: 1px solid var(--border);
     display: flex; align-items: center; justify-content: space-between; flex-shrink: 0;
@@ -484,8 +489,8 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
       </div>
     </div>
 
-    <!-- Validation Panel -->
-    <div class="panel" id="valPanel">
+    <!-- Validation Panel (hidden until validators exist) -->
+    <div class="panel hidden" id="valPanel">
       <div class="panel-header" id="valHeader" style="display:none">
         <div style="display:flex;align-items:center;gap:8px">
           <span class="tag val">VALIDATOR</span>
@@ -646,6 +651,19 @@ async function refresh() {
       validators[id] = {window:w.name, session_id:w.session_id, phase:w.val_phase||'analyzing', last_line:w.last_line||'', alive:w.alive!==false};
       return card(id, ticket, w.val_phase||'analyzing', w.last_line||'', selectedVal?.id, w.alive!==false);
     }).join('');
+  }
+
+  // Show/hide validator panel based on whether validators exist
+  const valPanel = $('#valPanel');
+  if (valAll.length > 0) { valPanel.classList.remove('hidden'); }
+  else { valPanel.classList.add('hidden'); }
+
+  // Auto-select first agent if none selected
+  if (!selectedSe && seAll.length > 0) {
+    const firstTicket = seAll[0].name.replace('se/','');
+    const firstId = 'se:'+firstTicket;
+    selectItem(firstId);
+    return; // selectItem triggers refresh, avoid double-run
   }
 
   // Top bar summary
