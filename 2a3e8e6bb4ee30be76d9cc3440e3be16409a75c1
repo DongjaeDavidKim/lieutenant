@@ -1,0 +1,44 @@
+dashboard.py
+  3ece972f0eeaceb9 19,279-288,915,1071,1074-1080
+  cd5cd3d0f223c8cd 20,32,36-54,1161-1168,1252-1255,1400-1470,1473,1478-1480,1487-1488,1494,1496-1504,1513-1516
+se-agent
+  cd5cd3d0f223c8cd 20-21,32-106,113,117,130-194,215,225-235,237-242,333,336-340,351,353,356-360,435,438-443,455,457,462-464,504-507,521,524-593,607,620
+.gitignore
+  cd5cd3d0f223c8cd 1-12
+index.html
+  cd5cd3d0f223c8cd 232-235,465,468-469,491-495,617-623
+  3ece972f0eeaceb9 641-653
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.12",
+  "base_commit_sha": "2a3e8e6bb4ee30be76d9cc3440e3be16409a75c1",
+  "prompts": {
+    "3ece972f0eeaceb9": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "916ed83a-2736-4df2-a468-aef4f248ce49",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Dongjae Kim <dakim@flow.life>",
+      "messages": [],
+      "total_additions": 35,
+      "total_deletions": 2,
+      "accepted_lines": 35,
+      "overriden_lines": 0
+    },
+    "cd5cd3d0f223c8cd": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "56a8b7f2-2d77-4dd4-bdbe-3e1edab49c4d",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Dongjae Kim <dakim@flow.life>",
+      "messages": [],
+      "total_additions": 438,
+      "total_deletions": 34,
+      "accepted_lines": 425,
+      "overriden_lines": 0
+    }
+  }
+}
