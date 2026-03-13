@@ -388,7 +388,6 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
           <button onclick="setSeView('tmux')">Terminal</button>
           <button onclick="setSeView('diff')">Diff</button>
           <button onclick="setSeView('artifacts')">Artifacts</button>
-          <button onclick="focusWindow(selectedSe)">Focus</button>
           <button class="danger" onclick="killWindow(selectedSe)">Kill</button>
         </div>
       </div>
@@ -411,7 +410,6 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
         <div class="btns">
           <button class="active" onclick="setValView('transcript')">Challenges</button>
           <button onclick="setValView('tmux')">Terminal</button>
-          <button onclick="focusWindow(selectedVal)">Focus</button>
         </div>
       </div>
       <div class="panel-body" id="valBody">
@@ -518,7 +516,7 @@ function selectItem(id) {
     if (!info) return;
     selectedSe = {id, ...info};
     $('#seHeader').style.display = 'flex';
-    $('#seCmdBar').style.display = info.alive !== false ? 'flex' : 'none';
+    updateCmdBarVisibility();
     $('#seTitle').textContent = id.replace('se:','').replace('orch:','') + (info.alive === false ? ' (finished)' : '');
     refreshSePanel();
 
@@ -542,7 +540,12 @@ function selectItem(id) {
   refresh(); // re-render sidebar for selection
 }
 
-function setSeView(v) { seView = v; refreshSePanel();
+function updateCmdBarVisibility() {
+  if (!selectedSe) { $('#seCmdBar').style.display = 'none'; return; }
+  // Show cmd bar on transcript tab for alive agents
+  $('#seCmdBar').style.display = (seView === 'transcript' && selectedSe.alive !== false) ? 'flex' : 'none';
+}
+function setSeView(v) { seView = v; updateCmdBarVisibility(); refreshSePanel();
   const map = {'transcript':'transcript','tmux':'terminal','diff':'diff','artifacts':'artifacts'};
   document.querySelectorAll('#seHeader .btns button').forEach(b =>
     b.classList.toggle('active', b.textContent.toLowerCase() === (map[v]||v))); }
@@ -583,6 +586,23 @@ function renderArtifacts(data) {
   html += '<div style="font-weight:600;color:var(--accent);font-size:10px;text-transform:uppercase;margin-bottom:4px">Status</div>';
   html += `<div style="font-size:11px">${esc(data.status||'unknown')}</div>`;
   html += '</div>';
+  // PR links
+  if (data.prs && data.prs.length) {
+    html += '<div style="margin-bottom:12px">';
+    html += '<div style="font-weight:600;color:var(--accent);font-size:10px;text-transform:uppercase;margin-bottom:4px">Pull Requests</div>';
+    data.prs.forEach(pr => {
+      const stateColor = pr.state === 'MERGED' ? 'var(--purple)' : pr.state === 'OPEN' ? 'var(--green)' : 'var(--red)';
+      html += `<div style="margin-bottom:4px"><a href="${esc(pr.url)}" target="_blank" style="color:var(--accent);text-decoration:none">#${pr.number}</a> <span style="color:${stateColor};font-size:9px;text-transform:uppercase">${esc(pr.state)}</span> ${esc(pr.title)}</div>`;
+    });
+    html += '</div>';
+  }
+  // Test results
+  if (data.test_results) {
+    html += '<div style="margin-bottom:12px">';
+    html += '<div style="font-weight:600;color:var(--accent);font-size:10px;text-transform:uppercase;margin-bottom:4px">Test Results</div>';
+    html += `<div style="background:var(--surface2);padding:8px;border-radius:4px;font-size:10px">${esc(data.test_results)}</div>`;
+    html += '</div>';
+  }
   // Commit log
   if (data.commits && data.commits.length) {
     html += '<div style="margin-bottom:12px">';
@@ -669,11 +689,6 @@ async function sendToSe() {
   inp.value = ''; setTimeout(refreshSePanel, 1500);
 }
 
-function focusWindow(sel) {
-  if (!sel) return;
-  fetch(`/api/focus/${sel.window}`, {method:'POST'});
-}
-
 async function killWindow(sel) {
   if (!sel || sel.id.startsWith('orch:')) return;
   if (!confirm(`Kill ${sel.id}?`)) return;
@@ -709,8 +724,8 @@ def _find_cage_workspace(ticket):
 
 
 def collect_artifacts(ticket):
-    """Gather commits, diff stat, files changed, and full diff for a ticket."""
-    result = {"status": "unknown", "commits": [], "files_changed": "", "diff_stat": "", "diff": ""}
+    """Gather commits, diff stat, files changed, full diff, PR links, and test results for a ticket."""
+    result = {"status": "unknown", "commits": [], "files_changed": "", "diff_stat": "", "diff": "", "prs": [], "test_results": ""}
 
     workspace = _find_cage_workspace(ticket)
     if not workspace:
@@ -774,6 +789,48 @@ def collect_artifacts(ticket):
                 break
             except Exception:
                 continue
+
+        # PR links — search for PRs matching the branch or ticket
+        try:
+            branch = _git(["branch", "--show-current"]).strip()
+            if branch:
+                pr_out = subprocess.check_output(
+                    ["gh", "pr", "list", "--head", branch, "--json", "number,title,url,state", "--limit", "5"],
+                    cwd=str(workspace), text=True, stderr=subprocess.DEVNULL, timeout=10
+                )
+                prs = json.loads(pr_out) if pr_out.strip() else []
+                result["prs"] = [{"number": p["number"], "title": p["title"], "url": p["url"], "state": p["state"]} for p in prs]
+        except Exception:
+            pass
+
+        # Test results — check for recent test output in tmux transcript
+        try:
+            for agent_id, info in _agent_history.items():
+                if ticket.lower() in agent_id.lower() and info.get("session_id"):
+                    msgs = read_transcript(info["session_id"], last_n=20)
+                    for msg in reversed(msgs):
+                        message = msg.get("message", {})
+                        content = message.get("content", [])
+                        if isinstance(content, list):
+                            for block in content:
+                                if not isinstance(block, dict):
+                                    continue
+                                if block.get("type") == "tool_result":
+                                    text = block.get("content", "")
+                                    if isinstance(text, str) and ("test" in text.lower() or "pass" in text.lower() or "fail" in text.lower()):
+                                        # Grab last 30 lines of test output
+                                        lines = text.strip().splitlines()
+                                        result["test_results"] = "\n".join(lines[-30:])
+                                        raise StopIteration
+                                if block.get("type") == "tool_use" and block.get("name") == "Bash":
+                                    cmd = block.get("input", {}).get("command", "")
+                                    if "test" in cmd or "jest" in cmd or "pytest" in cmd:
+                                        result["test_results"] = f"$ {cmd}\n(check terminal for output)"
+                                        raise StopIteration
+        except StopIteration:
+            pass
+        except Exception:
+            pass
 
     except Exception as e:
         result["status"] = f"error: {e}"
@@ -932,15 +989,6 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
         if m:
             ok = tmux_send(m.group(1), body.get("message", ""))
             self._json({"ok": ok})
-            return
-
-        m = re.match(r"/api/focus/(.+)", path)
-        if m:
-            try:
-                subprocess.check_call(["tmux", "select-window", "-t", f"swarm:{m.group(1)}"], stderr=subprocess.DEVNULL)
-                self._json({"ok": True})
-            except Exception:
-                self._json({"ok": False})
             return
 
         m = re.match(r"/api/kill/(.+)", path)
