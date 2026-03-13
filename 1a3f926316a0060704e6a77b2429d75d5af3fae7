@@ -1,0 +1,27 @@
+plan.md
+  3ece972f0eeaceb9 1-26
+se-agent
+  3ece972f0eeaceb9 33-40,44-49,53-60,65-68,71-75,94-95,103,110-114,345-346,357-358
+dashboard.py
+  3ece972f0eeaceb9 18,24-76,405-416,446-462,517,525-594,664,1026-1037,1157-1171,1332,1334-1346,1351-1352
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.12",
+  "base_commit_sha": "1a3f926316a0060704e6a77b2429d75d5af3fae7",
+  "prompts": {
+    "3ece972f0eeaceb9": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "916ed83a-2736-4df2-a468-aef4f248ce49",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Dongjae Kim <dakim@flow.life>",
+      "messages": [],
+      "total_additions": 271,
+      "total_deletions": 5,
+      "accepted_lines": 271,
+      "overriden_lines": 0
+    }
+  }
+}
