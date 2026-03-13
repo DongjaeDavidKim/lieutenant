@@ -1,0 +1,12 @@
+# Runtime state — regenerated on startup
+.port
+.plan_path
+dashboard.pid
+state.md
+
+# OS
+.DS_Store
+
+# Python
+__pycache__/
+*.pyc
