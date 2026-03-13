@@ -1,0 +1,59 @@
+lieutenant_phoenix/lib/lieutenant/plan_store.ex
+  a6e0a9037f2f3566 1-158
+lieutenant_phoenix/lib/lieutenant/tmux.ex
+  a6e0a9037f2f3566 1-99
+se-agent
+  a6e0a9037f2f3566 19,200,204,209-210,213,220-228,232-251,256,607,613-614,620-625
+lieutenant_phoenix/lib/lieutenant_phoenix_web/controllers/api_controller.ex
+  a6e0a9037f2f3566 1-85
+lieutenant_phoenix/lib/lieutenant/claude.ex
+  a6e0a9037f2f3566 1-78
+lieutenant_phoenix/lib/lieutenant_phoenix_web/live/dashboard_live.ex
+  a6e0a9037f2f3566 1-299,301-310,312-326,328-330,332-374,376-390,392-412,414-427,429-433,435-444,446-450,452-461,463-472,474-483,485-490,492-496
+lieutenant_phoenix/lib/lieutenant_phoenix_web/live/dashboard_live.html.heex
+  a6e0a9037f2f3566 1-263
+lieutenant_phoenix/lib/lieutenant_phoenix_web/router.ex
+  a6e0a9037f2f3566 20,23-24,26-36
+lieutenant_phoenix/config/dev.exs
+  a6e0a9037f2f3566 10-11
+lieutenant_phoenix/lib/lieutenant/formatter.ex
+  a6e0a9037f2f3566 1-237
+lieutenant_phoenix/lib/lieutenant_phoenix_web/components/layouts/root.html.heex
+  a6e0a9037f2f3566 7,9-12
+lieutenant_phoenix/lib/lieutenant/phase_detector.ex
+  a6e0a9037f2f3566 1-124
+lieutenant_phoenix/lib/lieutenant/agent_poller.ex
+  a6e0a9037f2f3566 1-119
+lieutenant_phoenix/priv/static/assets/css/app.css
+  a6e0a9037f2f3566 1-157
+lieutenant_phoenix/lib/lieutenant_phoenix/application.ex
+  a6e0a9037f2f3566 5-6,13-15,20-28,35-65
+lieutenant_phoenix/lib/lieutenant/artifacts.ex
+  a6e0a9037f2f3566 1-158
+lieutenant_phoenix/priv/static/assets/js/app.js
+  a6e0a9037f2f3566 1-2,4-17,19-24,26-27
+.gitignore
+  a6e0a9037f2f3566 10,13-19
+lieutenant_phoenix/lib/lieutenant/agent_store.ex
+  a6e0a9037f2f3566 1-66
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.12",
+  "base_commit_sha": "8dec7b746e8baacd8fbeca09fb69b4ef4b1d973c",
+  "prompts": {
+    "a6e0a9037f2f3566": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a4fbec55-4739-4b67-9acd-cb2964912912",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Dongjae Kim <dakim@flow.life>",
+      "messages": [],
+      "total_additions": 2222,
+      "total_deletions": 87,
+      "accepted_lines": 2169,
+      "overriden_lines": 15
+    }
+  }
+}
